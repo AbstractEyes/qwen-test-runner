@@ -116,10 +116,11 @@ class QwenRunner:
 
         # xgrammar compiler is reusable across calls — build once.
         self._xgr_compiled_grammar = None
+        self._xgr_tokenizer_info = None
         if _HAS_XGRAMMAR:
             try:
-                tokenizer_info = xgr.TokenizerInfo.from_huggingface(self.tokenizer)
-                self._xgr_compiler = xgr.GrammarCompiler(tokenizer_info)
+                self._xgr_tokenizer_info = xgr.TokenizerInfo.from_huggingface(self.tokenizer)
+                self._xgr_compiler = xgr.GrammarCompiler(self._xgr_tokenizer_info)
             except Exception as e:
                 warnings.warn(f"xgrammar tokenizer init failed: {e}; falling back")
                 self._xgr_compiler = None
@@ -265,13 +266,24 @@ class QwenRunner:
         self, prompt_str: str, grammar_gbnf: str, max_new_tokens: int,
         temperature: float, sampling_preset: Optional[str] = None,
     ) -> GenResult:
-        """xgrammar-backed constrained generation. Uses the LogitsProcessor integration."""
+        """xgrammar-backed constrained generation.
+
+        Uses a hand-rolled LogitsProcessor instead of `xgr.contrib.hf.LogitsProcessor`
+        because the latter passes a tensor scalar to `matcher.accept_token`, which
+        the current xgrammar tvm-ffi binding rejects (it requires a Python int).
+        Calling `.item()` on the token id, as every official xgrammar tutorial does,
+        sidesteps the bug.
+        """
         compiled = self._xgr_compiler.compile_grammar(grammar_gbnf)
 
         inputs = self.tokenizer(prompt_str, return_tensors="pt").to(self.device)
         n_in = inputs["input_ids"].shape[1]
 
-        logits_processor = xgr.contrib.hf.LogitsProcessor(compiled)
+        logits_processor = _XGrammarLogitsProcessor(
+            compiled_grammar=compiled,
+            vocab_size=self._xgr_tokenizer_info.vocab_size,
+            prompt_len=n_in,
+        )
 
         gen_kwargs = dict(
             max_new_tokens=max_new_tokens,
@@ -296,3 +308,47 @@ class QwenRunner:
         n_out = int(new_tokens.shape[0])
         text = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
         return GenResult("constrained", text, "xgrammar", n_in, n_out)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Custom xgrammar LogitsProcessor.
+#
+# Replaces the broken `xgr.contrib.hf.LogitsProcessor` (it passes a tensor scalar
+# to `accept_token`, which the current tvm-ffi binding rejects with
+# "Expected int but got ffi.Tensor"). We track previously-accepted positions and
+# convert every token to a plain int via `.item()` before passing it to xgrammar.
+# ──────────────────────────────────────────────────────────────────────────────
+
+class _XGrammarLogitsProcessor:
+    """Constrains HF `generate` output to a compiled xgrammar grammar."""
+
+    def __init__(self, compiled_grammar, vocab_size: int, prompt_len: int):
+        if not _HAS_XGRAMMAR:  # pragma: no cover
+            raise RuntimeError("xgrammar is not installed")
+        self.matcher = xgr.GrammarMatcher(compiled_grammar)
+        # bitmask must be int32 CPU per xgrammar docs; we move to logits.device
+        # on apply.
+        self.bitmask = xgr.allocate_token_bitmask(1, vocab_size)
+        self.prompt_len = prompt_len
+        self.accepted_up_to = prompt_len  # next position to accept from
+
+    def __call__(self, input_ids, scores):
+        # input_ids: (batch=1, cur_len)   scores: (batch=1, vocab_size)
+        cur_len = int(input_ids.shape[1])
+
+        # Accept every token generated since we last ran. On the first call
+        # cur_len == prompt_len, so this loop is a no-op.
+        for pos in range(self.accepted_up_to, cur_len):
+            tok = int(input_ids[0, pos].item())  # ← the critical .item() fix
+            ok = self.matcher.accept_token(tok)
+            if not ok:  # pragma: no cover — shouldn't happen with constrained sampling
+                break
+        self.accepted_up_to = cur_len
+
+        if self.matcher.is_terminated():
+            return scores
+
+        # Fill bitmask and apply to current-step logits.
+        self.matcher.fill_next_token_bitmask(self.bitmask)
+        xgr.apply_token_bitmask_inplace(scores, self.bitmask.to(scores.device))
+        return scores
