@@ -1,0 +1,26 @@
+# Development requirements — everything in requirements.txt plus optional
+# extras for running the constrained-decode pipeline and the dev tooling.
+#
+# Use with:
+#     pip install -r requirements-dev.txt
+
+-r requirements.txt
+
+# ── Constrained decoding backends ───────────────────────────────────────────
+# xgrammar is the fastest; outlines is the fallback. The benchmark degrades
+# gracefully if neither is installed (constrained mode → json_mode fallback).
+xgrammar>=0.1.10
+outlines>=0.1.0
+
+# ── Fine-tuning stack ───────────────────────────────────────────────────────
+# Only needed if you plan to SFT the base model after the diagnostic run.
+peft>=0.11
+bitsandbytes>=0.43
+datasets>=2.20
+trl>=0.9
+
+# ── Testing & linting ───────────────────────────────────────────────────────
+pytest>=7.4
+pytest-cov>=4.1
+ruff>=0.5
+mypy>=1.10
