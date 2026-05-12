@@ -2,6 +2,7 @@
 
 Public API:
     from qwen_test_runner import Caption, QwenRunner, score_sample, score_run
+    from qwen_test_runner import SLOT_REGISTRY, SlotSpec   # v0.2 registry
 
 CLI:
     qwen-bench --help
@@ -9,18 +10,30 @@ CLI:
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
-# Schema — single source of truth for the caption representation
+# Registry — single source of truth for all slot definitions
+from .registry import (
+    SLOT_REGISTRY,
+    SlotSpec,
+    SubjectValue,
+    Category,
+    Cardinality,
+    Vocabulary,
+    Groundedness,
+    slots_by_category,
+    slot_names,
+    get_slot,
+    all_closed_vocab,
+)
+
+# Schema — generated from registry at import time
 from .schema import (
     Caption,
-    Subject,
-    Composition,
-    Setting,
-    Framing,
-    Perspective,
+    Subject,                     # alias for SubjectValue, kept for back-compat
     CAPTION_JSON_SCHEMA,
     CAPTION_GRAMMAR_GBNF,
+    build_gbnf_grammar,
 )
 
 # Evaluation — scoring functions
@@ -50,20 +63,27 @@ def __getattr__(name: str):
     if name == "GenResult":
         from .model_runner import GenResult
         return GenResult
+    if name == "ClaudeProvider":
+        from .providers.claude_api import ClaudeProvider
+        return ClaudeProvider
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [
     "__version__",
-    # schema
-    "Caption", "Subject", "Composition", "Setting", "Framing", "Perspective",
-    "CAPTION_JSON_SCHEMA", "CAPTION_GRAMMAR_GBNF",
+    # registry
+    "SLOT_REGISTRY", "SlotSpec", "SubjectValue",
+    "Category", "Cardinality", "Vocabulary", "Groundedness",
+    "slots_by_category", "slot_names", "get_slot", "all_closed_vocab",
+    # schema (generated)
+    "Caption", "Subject",
+    "CAPTION_JSON_SCHEMA", "CAPTION_GRAMMAR_GBNF", "build_gbnf_grammar",
     # evaluator
     "parse_safely", "ground_check", "coverage_check",
     "score_sample", "score_run",
     "SampleResult", "RunMetrics", "GroundingReport", "CoverageReport",
     # eval data
     "BUILTIN_CAPTIONS", "load_eval_set",
-    # model (lazy)
-    "QwenRunner", "GenResult",
+    # runners (lazy)
+    "QwenRunner", "GenResult", "ClaudeProvider",
 ]

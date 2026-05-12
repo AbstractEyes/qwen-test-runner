@@ -8,8 +8,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qwen-test-runner"
-version = "0.1.0"
-description = "Diagnostic testbed for evaluating small Qwen models on structured JSON output (caption schema)."
+version = "0.2.0"
+description = "Diagnostic testbed for evaluating small Qwen models on structured JSON output (caption schema). v0.2: registry-driven schema, Claude API provider for SFT data generation."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
@@ -73,6 +73,11 @@ constrained = [
     "outlines>=0.1.0",
 ]
 
+# Claude API provider (for SFT-data generation and comparison baselines).
+claude = [
+    "anthropic>=0.40",
+]
+
 # Fine-tuning stack. Pulled in only if you plan to run SFT on the 0.8B base.
 train = [
     "peft>=0.11",
@@ -91,7 +96,7 @@ dev = [
 
 # Convenience meta-extra: everything.
 all = [
-    "qwen-test-runner[constrained,train,dev]",
+    "qwen-test-runner[constrained,claude,train,dev]",
 ]
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -102,6 +107,7 @@ all = [
 
 [project.scripts]
 qwen-bench = "qwen_test_runner.run_benchmark:main"
+qwen-datagen = "qwen_test_runner.data_gen:main"
 
 [project.urls]
 Repository = "https://github.com/AbstractEyes/qwen-test-runner"
@@ -112,7 +118,7 @@ Issues = "https://github.com/AbstractEyes/qwen-test-runner/issues"
 # ──────────────────────────────────────────────────────────────────────────────
 
 [tool.setuptools]
-packages = ["qwen_test_runner"]
+packages = ["qwen_test_runner", "qwen_test_runner.providers"]
 
 [tool.setuptools.package-data]
 qwen_test_runner = ["py.typed"]

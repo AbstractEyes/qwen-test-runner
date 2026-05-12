@@ -2,18 +2,18 @@
 evaluator.py — Scores model output along three orthogonal axes:
 
   1. SCHEMA VALIDITY:  does it parse as JSON, and validate against the Pydantic schema?
-  2. GROUNDING:        is every leaf string (subject name, attribute, action) traceable
-                       to the input caption? This is the hallucination metric.
+  2. GROUNDING:        is every leaf string traceable to the input caption?
+                       This is the hallucination metric. v0.2: per-slot rule
+                       driven by `groundedness` in registry.SLOT_REGISTRY.
   3. COVERAGE:         did the model surface the obvious nouns/verbs from the input,
                        or did it drop information? (cheap recall signal)
 
-Grounding rule (the only one that matters for the headline result):
-  A leaf string g is GROUNDED if either
-    (a) g is in a closed vocabulary (settings, framings, perspectives),
-    (b) some normalized variant of g appears as a substring of the input caption,
-    (c) g is a singular/plural sibling of a word in the input caption.
-
-Anything else is HALLUCINATED.
+Grounding rules (per slot, read from registry):
+  - must_ground   : every leaf MUST trace to input. Otherwise hallucinated.
+  - may_infer     : leaf is allowed regardless of input. Counted as grounded.
+                    Closed-vocab values (e.g. "indoor") are also auto-grounded
+                    because the grammar enforces the value space anyway.
+  - derived_only  : leaf is expected to be inferred. Auto-grounded, never penalized.
 """
 
 from __future__ import annotations
@@ -24,14 +24,13 @@ from typing import List, Optional, Tuple
 
 from pydantic import ValidationError
 
-from .schema import Caption, Setting, Framing, Perspective
+from .schema import Caption
+from .registry import SLOT_REGISTRY, SubjectValue, all_closed_vocab
 
 
-CLOSED_VOCAB = {
-    "indoor", "outdoor", "unknown",
-    "close-up", "medium", "wide",
-    "front", "side", "above", "below", "behind",
-}
+# Auto-grounded values — anything in any closed vocab is always counted as
+# grounded since the grammar pins the value space.
+CLOSED_VOCAB: set[str] = all_closed_vocab()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -167,27 +166,53 @@ class GroundingReport:
         return self.leaves_grounded / self.leaves_total if self.leaves_total else 1.0
 
 
+def _collect_leaves(caption: Caption) -> List[Tuple[str, str, str]]:
+    """Walk the caption and return (path, value, groundedness) for every leaf.
+
+    Closed-vocab single-value slots are NOT included — their value space is
+    grammar-enforced, so they can't hallucinate by definition.
+    """
+    leaves: List[Tuple[str, str, str]] = []
+    for slot_name, spec in SLOT_REGISTRY.items():
+        val = getattr(caption, slot_name)
+
+        if spec.cardinality == "list":
+            if spec.nested_model is SubjectValue:
+                for i, subj in enumerate(val):
+                    leaves.append((f"{slot_name}[{i}].name", subj.name, spec.groundedness))
+                    for j, attr in enumerate(subj.attributes):
+                        leaves.append(
+                            (f"{slot_name}[{i}].attributes[{j}]", attr, spec.groundedness)
+                        )
+            else:
+                for i, item in enumerate(val):
+                    leaves.append((f"{slot_name}[{i}]", item, spec.groundedness))
+        else:
+            if val is None:
+                continue
+            if spec.vocabulary == "closed":
+                # Value space is grammar-enforced — auto-grounded, not a leaf.
+                continue
+            leaves.append((slot_name, val, spec.groundedness))
+    return leaves
+
+
 def ground_check(caption: Caption, input_text: str) -> GroundingReport:
-    """Walk every leaf in the parsed caption; flag anything not traceable to input."""
-    leaves: List[Tuple[str, str]] = []  # (path, value) for each user-controlled string
+    """Walk every leaf in the parsed caption; flag per the slot's groundedness rule.
 
-    for i, subj in enumerate(caption.subjects):
-        leaves.append((f"subjects[{i}].name", subj.name))
-        for j, attr in enumerate(subj.attributes):
-            leaves.append((f"subjects[{i}].attributes[{j}]", attr))
-
-    for i, act in enumerate(caption.actions):
-        leaves.append((f"actions[{i}]", act))
-
-    if caption.mood is not None:
-        leaves.append(("mood", caption.mood))
-
-    # setting / composition.framing / composition.perspective are constrained to
-    # closed vocabularies by the Pydantic Literal types, so they're auto-grounded.
-
+      - must_ground: leaf must trace to input or it's hallucinated
+      - may_infer:   leaf auto-counts as grounded (closed enums + soft slots)
+      - derived_only: leaf auto-counts as grounded (model is expected to infer)
+    """
+    leaves = _collect_leaves(caption)
     grounded = 0
     halluc: List[Tuple[str, str]] = []
-    for path, val in leaves:
+
+    for path, val, groundedness in leaves:
+        if groundedness in ("may_infer", "derived_only"):
+            grounded += 1
+            continue
+        # must_ground — strict check
         if _is_grounded(val, input_text):
             grounded += 1
         else:
@@ -227,14 +252,35 @@ class CoverageReport:
         return self.output_coverage / self.input_content_tokens if self.input_content_tokens else 1.0
 
 
+def _collect_output_strings(caption: Caption) -> list[str]:
+    """All string content the model produced, for coverage / recall scoring.
+
+    Iterates the registry so new slots automatically participate in coverage.
+    Closed-vocab single-value slots are excluded — their values come from the
+    enum, not from input content, so they're not informative for recall.
+    """
+    out: list[str] = []
+    for slot_name, spec in SLOT_REGISTRY.items():
+        val = getattr(caption, slot_name)
+        if spec.cardinality == "list":
+            if spec.nested_model is SubjectValue:
+                for subj in val:
+                    out.append(subj.name)
+                    out.extend(subj.attributes)
+            else:
+                out.extend(val)
+        else:
+            if val is None:
+                continue
+            if spec.vocabulary == "closed":
+                continue
+            out.append(val)
+    return out
+
+
 def coverage_check(caption: Caption, input_text: str) -> CoverageReport:
     in_tokens = _content_tokens(input_text)
-    out_blob = " ".join(
-        [s.name for s in caption.subjects]
-        + [a for s in caption.subjects for a in s.attributes]
-        + list(caption.actions)
-        + ([caption.mood] if caption.mood else [])
-    )
+    out_blob = " ".join(_collect_output_strings(caption))
     out_tokens = _content_tokens(out_blob)
     overlap = in_tokens & out_tokens
     return CoverageReport(len(in_tokens), len(overlap))
