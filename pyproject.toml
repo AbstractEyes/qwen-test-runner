@@ -1,0 +1,154 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Project metadata (PEP 621)
+# ──────────────────────────────────────────────────────────────────────────────
+
+[project]
+name = "qwen-test-runner"
+version = "0.1.0"
+description = "Diagnostic testbed for evaluating small Qwen models on structured JSON output (caption schema)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "AbstractEyes (Phil)" },
+]
+keywords = [
+    "qwen",
+    "llm",
+    "json-schema",
+    "constrained-generation",
+    "benchmark",
+    "caption",
+    "structured-output",
+    "xgrammar",
+    "fine-tuning",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Runtime dependencies.
+#
+# `transformers` is pinned to git main because model_type=qwen3_5 is not in
+# any released wheel yet. When a release ships with native qwen3_5 support,
+# swap this for a normal version pin like `transformers >= 4.57.0`.
+#
+# `torchvision` and `pillow` are required by Qwen3.5 even in text-only use
+# because the VLM tokenizer initialization touches the image processor.
+# ──────────────────────────────────────────────────────────────────────────────
+
+dependencies = [
+    "torch>=2.4",
+    "transformers @ git+https://github.com/huggingface/transformers.git@main",
+    "pydantic>=2.0",
+    "accelerate>=0.30",
+    "torchvision",
+    "pillow",
+    "numpy",
+]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Optional extras, install with `pip install -e ".[constrained]"` etc.
+# ──────────────────────────────────────────────────────────────────────────────
+
+[project.optional-dependencies]
+# Grammar-constrained decoding backends. xgrammar is the fastest; outlines is
+# the fallback. The benchmark degrades gracefully if neither is installed.
+constrained = [
+    "xgrammar>=0.1.10",
+    "outlines>=0.1.0",
+]
+
+# Fine-tuning stack. Pulled in only if you plan to run SFT on the 0.8B base.
+train = [
+    "peft>=0.11",
+    "bitsandbytes>=0.43",
+    "datasets>=2.20",
+    "trl>=0.9",
+]
+
+# Development / testing.
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+
+# Convenience meta-extra: everything.
+all = [
+    "qwen-test-runner[constrained,train,dev]",
+]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CLI entry points.
+# After `pip install -e .` (or `pip install .`), users can invoke `qwen-bench`
+# from any working directory.
+# ──────────────────────────────────────────────────────────────────────────────
+
+[project.scripts]
+qwen-bench = "qwen_test_runner.run_benchmark:main"
+
+[project.urls]
+Repository = "https://github.com/AbstractEyes/qwen-test-runner"
+Issues = "https://github.com/AbstractEyes/qwen-test-runner/issues"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Package discovery
+# ──────────────────────────────────────────────────────────────────────────────
+
+[tool.setuptools]
+packages = ["qwen_test_runner"]
+
+[tool.setuptools.package-data]
+qwen_test_runner = ["py.typed"]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Tooling config
+# ──────────────────────────────────────────────────────────────────────────────
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra -q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long — handled by formatter
+]
+
+[tool.mypy]
+python_version = "3.10"
+strict = false
+warn_unused_configs = true
+warn_unused_ignores = true
+warn_return_any = true
+no_implicit_optional = true
+ignore_missing_imports = true

@@ -1,0 +1,31 @@
+# Runtime dependencies for qwen-test-runner.
+#
+# This file mirrors `[project.dependencies]` in pyproject.toml for users who
+# prefer `pip install -r requirements.txt` over `pip install -e .`.
+#
+# If you want optional extras (constrained decoding, fine-tuning, dev tooling),
+# either:
+#   - install the package with extras:  pip install -e ".[constrained,train,dev]"
+#   - or install requirements-dev.txt: pip install -r requirements-dev.txt
+
+# Core ML
+torch>=2.4
+
+# transformers must come from git main — model_type=qwen3_5 is not in any
+# released wheel yet. When a release lands with qwen3_5 support, swap this
+# line for `transformers>=X.Y.Z`.
+transformers[serving] @ git+https://github.com/huggingface/transformers.git@main
+
+# Pydantic 2 — schema validation and JSON Schema generation
+pydantic>=2.0
+
+# Accelerate — device placement and dtype handling for HF generate
+accelerate>=0.30
+
+# Required by Qwen3.5 even in text-only use (it's a VLM, image processor
+# initializes at load time)
+torchvision
+pillow
+
+# General numeric utility
+numpy
