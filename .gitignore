@@ -48,6 +48,8 @@ htmlcov/
 
 # ── Benchmark outputs (do NOT commit — these are per-run experiment artifacts) ──
 runs/
+datasets/
+scratch/
 *.jsonl
 
 # ── Model weights / large files (in case anyone caches locally) ────────────

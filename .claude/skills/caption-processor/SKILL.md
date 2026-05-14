@@ -7,8 +7,11 @@ description: >
   between Claude and Qwen on the same eval set. Trigger phrases:
   "process captions", "generate training data", "structure these captions",
   "run claude on the caption schema", "make SFT data", "convert captions to
-  json schema". The skill knows the registry, the strict vs enhance prompts,
-  the grounding-filter rule, and the SFT row format.
+  json schema". Works in both Claude Code (project-local skill) and Cowork
+  (installed via Customize > Skills). The skill knows the registry, the
+  strict vs enhance prompts, the grounding-filter rule, and the SFT row
+  format. Prerequisites: qwen-test-runner installed via pip, ANTHROPIC_API_KEY
+  set in the environment.
 ---
 
 # Caption Processor (Claude Code agent)
@@ -17,8 +20,32 @@ description: >
 
 This repo, **qwen-test-runner**, defines a registry-driven caption schema and
 exposes a `qwen-datagen` CLI that uses Claude to produce SFT-ready training
-data. This skill lets you (Claude Code) run that pipeline directly without
-needing the user to drive it command by command.
+data. This skill lets you (Claude Code or Cowork) run that pipeline directly
+without needing the user to drive it command by command.
+
+## Before doing anything — environment check
+
+Run this once at the start of any session that uses this skill. It's safe to
+re-run; the steps are idempotent.
+
+```bash
+# 1. Is the package installed?
+qwen-datagen --help >/dev/null 2>&1 || pip install -e /path/to/qwen-test-runner --quiet
+
+# 2. Is the API key available?
+test -n "$ANTHROPIC_API_KEY" || echo "WARN: ANTHROPIC_API_KEY not set — qwen-datagen will fail"
+
+# 3. Tests pass on the installed version?
+python -m pytest /path/to/qwen-test-runner/tests/ -q 2>&1 | tail -1
+```
+
+If `ANTHROPIC_API_KEY` is unset, STOP and ask the user to set it. Don't try
+to "discover" it — never read from arbitrary config files, dotfiles, or
+keychain. The user must provide it explicitly per session.
+
+If you are running in Cowork, the package may need re-installing each
+session (the VM is not always persistent). The `pip install -e .` is
+fast (~5s on a warm pip cache) and idempotent.
 
 ## Standing rules
 
